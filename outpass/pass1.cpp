@@ -57,56 +57,58 @@ struct CountOp : public FunctionPass
     int opt_id = 0;
     errs() << "Function " << F.getName() << '\n';
     //to do, change to basic block iterator
-    for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
+    for (auto &B : F)
     {
-      Instruction *inst = &*I;
-      if (CallInst *c1 = dyn_cast<CallInst>(inst))
+      for (auto &I : B)
       {
-
-        Function *calledFunc = c1->getCalledFunction();
-        if (calledFunc)
+        Instruction *inst = &I;
+        if (CallInst *c1 = dyn_cast<CallInst>(inst))
         {
-          // errs() << calledFunc->getName() << '\n';
-          if ((calledFunc->getName().find("flush_caches") == std::string::npos))
+
+          Function *calledFunc = c1->getCalledFunction();
+          if (calledFunc)
           {
-            continue;
+            // errs() << calledFunc->getName() << '\n';
+            if ((calledFunc->getName().find("flush_caches") == std::string::npos))
+            {
+              continue;
+            }
+            errs() << "CALL: " << calledFunc->getName() << '\n';
+            bottom = &*inst_begin(F);
+            Instruction *injection_point = &*++inst_begin(F);
+            //pushForwardTop(inst);
+            //Just need to insert OPT ADDR now.
+            //get the address of the flush instruction
+            Value *v1 = inst->getOperand(0);
+            errs() << "v1 type:";
+            v1->getType()->print(errs());
+            errs() << '\n';
+            //get the size of the flush instruction
+            Value *v2 = inst->getOperand(1);
+            errs() << "v2 type:";
+            v2->getType()->print(errs());
+            errs() << '\n';
+            Module *M = F.getParent();
+
+            Constant *c = M->getOrInsertFunction("OPT_ADDR_AUTO",
+                                                 Type::getVoidTy(F.getContext()),
+                                                 Type::getInt8PtrTy(F.getContext()),
+                                                 IntegerType::get(F.getContext(), 32));
+            Function *opt_addr_func = cast<Function>(c);
+
+            //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
+            //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
+            //insert the opt before the first instruction
+            IRBuilder<> builder(injection_point);
+
+            builder.CreateCall(opt_addr_func, {v1, v2});
+            opt_id++;
+            pushForwardTop(inst);
+            //OPT_ADDR((void*)idx, 0, addr, size);
           }
-          errs() << "CALL: " << calledFunc->getName() << '\n';
-          bottom = &*inst_begin(F);
-          Instruction* injection_point = &*++inst_begin(F);
-          //pushForwardTop(inst);
-          //Just need to insert OPT ADDR now.
-          //get the address of the flush instruction
-          Value *v1 = inst->getOperand(0);
-          errs() << "v1 type:";
-          v1->getType()->print(errs());
-          errs() << '\n';
-          //get the size of the flush instruction
-          Value *v2 = inst->getOperand(1);
-          errs() << "v2 type:";
-          v2->getType()->print(errs());
-          errs() << '\n';
-          Module *M = F.getParent();
-
-          Constant *c = M->getOrInsertFunction("OPT_ADDR_AUTO",
-                                               Type::getVoidTy(F.getContext()),
-                                               Type::getInt8PtrTy(F.getContext()),
-                                               IntegerType::get(F.getContext(), 32));
-          Function *opt_addr_func = cast<Function>(c);
-
-          //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
-          //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
-          //insert the opt before the first instruction
-          IRBuilder<> builder(injection_point);
-
-          builder.CreateCall(opt_addr_func, {v1, v2});
-          opt_id++;
-          pushForwardTop(inst);
-          //OPT_ADDR((void*)idx, 0, addr, size);
         }
-      }
 
-      /*
+        /*
     for (Function::iterator bb = F.begin(), e = F.end(); bb != e; ++bb)
     {
       for (BasicBlock::iterator i = bb->begin(), e = bb->end(); i != e; ++i)
@@ -119,7 +121,7 @@ struct CountOp : public FunctionPass
       }
     }
     */
-
+      }
     }
     errs() << "done\n";
     return false;
