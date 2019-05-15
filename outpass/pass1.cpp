@@ -20,52 +20,93 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Value.h"
-#include <map>
+#include <unordered_set>
 using namespace llvm;
 namespace
 {
 struct CountOp : public FunctionPass
 {
+  Instruction *bottom;
+  void pushForwardTop(Instruction *inst)
+  {
+    int operandCount = inst->getNumOperands();
+    for (int j = 0; j < operandCount; j++)
+    {
+      Value *v = inst->getOperand(j);
+      pushForward(v);
+    }
+  }
+  //std::unordered_set<Instruction *> pushed_instructions;
+  void pushForward(Value *v)
+  {
+    Instruction *inst = dyn_cast<Instruction>(v);
+    if (inst == NULL)
+    {
+      return;
+    }
+    inst->moveBefore(bottom);
+    bottom = inst;
+    pushForwardTop(inst);
+  }
+
   std::map<std::string, int> opCounter;
   static char ID;
   CountOp() : FunctionPass(ID) {}
   virtual bool runOnFunction(Function &F)
   {
+    int opt_id = 0;
     errs() << "Function " << F.getName() << '\n';
-    for (inst_iterator I = inst_begin(F), E= inst_end(F); I != E; ++I){
-    Instruction *inst = &*I;
-    //check if the instruction is foo
-    if(CallInst *c1 = dyn_cast<CallInst> (inst)){
-      errs() << "This is a call instruction" << '\n';
-      Function *calledFunc = c1->getCalledFunction();
-      if(calledFunc){
-        errs() << calledFunc->getName() << '\n';
-        if(calledFunc->getName()=="foo"){
-          continue;
+    //to do, change to basic block iterator
+    for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
+    {
+      Instruction *inst = &*I;
+      if (CallInst *c1 = dyn_cast<CallInst>(inst))
+      {
+
+        Function *calledFunc = c1->getCalledFunction();
+        if (calledFunc)
+        {
+          // errs() << calledFunc->getName() << '\n';
+          if ((calledFunc->getName().find("flush_caches") == std::string::npos))
+          {
+            continue;
+          }
+          errs() << "CALL: " << calledFunc->getName() << '\n';
+          bottom = &*inst_begin(F);
+          Instruction* injection_point = &*++inst_begin(F);
+          //pushForwardTop(inst);
+          //Just need to insert OPT ADDR now.
+          //get the address of the flush instruction
+          Value *v1 = inst->getOperand(0);
+          errs() << "v1 type:";
+          v1->getType()->print(errs());
+          errs() << '\n';
+          //get the size of the flush instruction
+          Value *v2 = inst->getOperand(1);
+          errs() << "v2 type:";
+          v2->getType()->print(errs());
+          errs() << '\n';
+          Module *M = F.getParent();
+
+          Constant *c = M->getOrInsertFunction("OPT_ADDR_AUTO",
+                                               Type::getVoidTy(F.getContext()),
+                                               Type::getInt8PtrTy(F.getContext()),
+                                               IntegerType::get(F.getContext(), 32));
+          Function *opt_addr_func = cast<Function>(c);
+
+          //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
+          //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
+          //insert the opt before the first instruction
+          IRBuilder<> builder(injection_point);
+
+          builder.CreateCall(opt_addr_func, {v1, v2});
+          opt_id++;
+          pushForwardTop(inst);
+          //OPT_ADDR((void*)idx, 0, addr, size);
         }
-        //if the instruction is foo, inject laa
-        Module *M = F.getParent();
-
-          Constant *c = M->getOrInsertFunction("laa",
-              IntegerType::get(F.getContext(),32), NULL);
-          Function *laa = cast<Function>(c);
-
-          //ConstantInt *a = ConstantInt::get(M->getContext(), APInt(32, 9437184));
-
-          IRBuilder<> builder(inst);
-          //Value *strPtr = builder.CreateGlobalStringPtr("/dev/mem", ".str");
-
-          //ConstantInt *a = builder.getInt32(9437184);
-          //CallInst *openRet = builder.CreateCall2(open, strPtr, a, "open");
-
-          builder.CreateCall(laa);
-
       }
 
-
-    }
-    
-    /*
+      /*
     for (Function::iterator bb = F.begin(), e = F.end(); bb != e; ++bb)
     {
       for (BasicBlock::iterator i = bb->begin(), e = bb->end(); i != e; ++i)
@@ -78,7 +119,9 @@ struct CountOp : public FunctionPass
       }
     }
     */
+
     }
+    errs() << "done\n";
     return false;
   }
 };
