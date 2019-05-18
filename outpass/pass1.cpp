@@ -134,6 +134,7 @@ struct CountOp : public FunctionPass
               // Get the ancestor of the Src.
               Instruction *src_inst = dyn_cast<Instruction>(v2);
               Instruction *target = inst;
+              int isSelf=0;
               if(src_inst != NULL){
                   target=src_inst;
               }
@@ -153,8 +154,13 @@ struct CountOp : public FunctionPass
               //insert the opt before the first instruction
               IRBuilder<> builder(target);
 
-              //Instruction* injected_inst = builder.CreateCall(opt_func, {v1, v2, v3});
-              //injected_inst->moveBefore(inst);
+              Instruction* injected_inst = builder.CreateCall(opt_func, {v1, v2, v3});
+              if(isSelf){
+                injected_inst->moveBefore(inst);
+              }else{
+                injected_inst->moveAfter(inst);
+              }
+              
               opt_id++;
               }
             }
