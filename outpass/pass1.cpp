@@ -98,19 +98,19 @@ struct CountOp : public FunctionPass
               v2->getType()->print(errs());
               errs() << '\n';
               Module *M = F.getParent();
-
+              ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(32, opt_id));
               Constant *c = M->getOrInsertFunction("OPT_ADDR_AUTO",
                                                    Type::getVoidTy(F.getContext()),
-                                                   Type::getInt8PtrTy(F.getContext()),
-                                                   IntegerType::get(F.getContext(), 32));
+                                                   v1->getType(),
+                                                   v2->getType(),
+                                                   opt_id_const->getType());
               Function *opt_addr_func = cast<Function>(c);
-
               //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
               //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
               //insert the opt before the first instruction
               IRBuilder<> builder(injection_point);
 
-              builder.CreateCall(opt_addr_func, {v1, v2});
+              builder.CreateCall(opt_addr_func, {v1, v2, opt_id_const});
               opt_id++;
               pushForwardTop(inst);
               //OPT_ADDR((void*)idx, 0, addr, size);
@@ -137,26 +137,28 @@ struct CountOp : public FunctionPass
               int isSelf=0;
               if(src_inst != NULL){
                   target=src_inst;
+                  isSelf=1;
               }
 
 
 
               Module *M = F.getParent();
+              ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(32, opt_id));
               Constant *c = M->getOrInsertFunction("OPT_AUTO",
                                                    Type::getVoidTy(F.getContext()),
                                                    v1->getType(),
                                                    v2->getType(),
-                                                   v3->getType());
+                                                   v3->getType(),
+                                                   opt_id_const->getType());
               Function *opt_func = cast<Function>(c);
-
-              //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
               //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
               //insert the opt before the first instruction
-              IRBuilder<> builder(target);
+              IRBuilder<> builder(inst);
 
-              Instruction* injected_inst = builder.CreateCall(opt_func, {v1, v2, v3});
+              Instruction* injected_inst = builder.CreateCall(opt_func, {v1, v2, v3, opt_id_const});
+              
               if(isSelf){
-                injected_inst->moveBefore(inst);
+                injected_inst->moveAfter(inst);
               }else{
                 injected_inst->moveAfter(inst);
               }
