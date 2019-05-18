@@ -59,6 +59,10 @@ struct CountOp : public FunctionPass
     //to do, change to basic block iterator
     for (auto &B : F)
     {
+      if (F.size() > 1)
+      {
+        break;
+      }
       for (auto &I : B)
       {
         Instruction *inst = &I;
@@ -69,42 +73,81 @@ struct CountOp : public FunctionPass
           if (calledFunc)
           {
             // errs() << calledFunc->getName() << '\n';
-            if ((calledFunc->getName().find("flush_caches") == std::string::npos))
+            if (calledFunc->getName().find("NO_OPT") != std::string::npos)
             {
-              continue;
+              errs() << "No OPT function----------------------\n";
+              inst->eraseFromParent();
+              return false;
             }
-            errs() << "CALL: " << calledFunc->getName() << '\n';
-            bottom = &*inst_begin(F);
-            Instruction *injection_point = &*++inst_begin(F);
-            //pushForwardTop(inst);
-            //Just need to insert OPT ADDR now.
-            //get the address of the flush instruction
-            Value *v1 = inst->getOperand(0);
-            errs() << "v1 type:";
-            v1->getType()->print(errs());
-            errs() << '\n';
-            //get the size of the flush instruction
-            Value *v2 = inst->getOperand(1);
-            errs() << "v2 type:";
-            v2->getType()->print(errs());
-            errs() << '\n';
-            Module *M = F.getParent();
+            if (calledFunc->getName().find("flush_caches") != std::string::npos)
+            {
 
-            Constant *c = M->getOrInsertFunction("OPT_ADDR_AUTO",
-                                                 Type::getVoidTy(F.getContext()),
-                                                 Type::getInt8PtrTy(F.getContext()),
-                                                 IntegerType::get(F.getContext(), 32));
-            Function *opt_addr_func = cast<Function>(c);
+              errs() << "CALL: " << calledFunc->getName() << '\n';
+              bottom = &*inst_begin(F);
+              Instruction *injection_point = bottom->getNextNode();
+              //pushForwardTop(inst);
+              //Just need to insert OPT ADDR now.
+              //get the address of the flush instruction
+              Value *v1 = inst->getOperand(0);
+              errs() << "v1 type:";
+              v1->getType()->print(errs());
+              errs() << '\n';
+              //get the size of the flush instruction
+              Value *v2 = inst->getOperand(1);
+              errs() << "v2 type:";
+              v2->getType()->print(errs());
+              errs() << '\n';
+              Module *M = F.getParent();
 
-            //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
-            //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
-            //insert the opt before the first instruction
-            IRBuilder<> builder(injection_point);
+              Constant *c = M->getOrInsertFunction("OPT_ADDR_AUTO",
+                                                   Type::getVoidTy(F.getContext()),
+                                                   Type::getInt8PtrTy(F.getContext()),
+                                                   IntegerType::get(F.getContext(), 32));
+              Function *opt_addr_func = cast<Function>(c);
 
-            builder.CreateCall(opt_addr_func, {v1, v2});
-            opt_id++;
-            pushForwardTop(inst);
-            //OPT_ADDR((void*)idx, 0, addr, size);
+              //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
+              //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
+              //insert the opt before the first instruction
+              IRBuilder<> builder(injection_point);
+
+              builder.CreateCall(opt_addr_func, {v1, v2});
+              opt_id++;
+              pushForwardTop(inst);
+              //OPT_ADDR((void*)idx, 0, addr, size);
+            }else{
+              if((calledFunc->getName().find("memcpy") != std::string::npos)){
+              Value *v1 = inst->getOperand(0);
+              errs() << "v1 type:";
+              v1->getType()->print(errs());
+              errs() << '\n';
+              //get the size of the flush instruction
+              Value *v2 = inst->getOperand(1);
+              errs() << "v2 type:";
+              v2->getType()->print(errs());
+              errs() << '\n';
+              Value *v3 = inst->getOperand(3);
+              errs() << "v3 type:";
+              v3->getType()->print(errs());
+              errs() << '\n';
+              Module *M = F.getParent();
+
+              Constant *c = M->getOrInsertFunction("OPT_AUTO",
+                                                   Type::getVoidTy(F.getContext()),
+                                                   v1->getType(),
+                                                   v2->getType(),
+                                                   v3->getType());
+              Function *opt_func = cast<Function>(c);
+
+              //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
+              //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
+              //insert the opt before the first instruction
+              IRBuilder<> builder(inst);
+
+              //Instruction* injected_inst = builder.CreateCall(opt_func, {v1, v2, v3});
+              //injected_inst->moveBefore(inst);
+              opt_id++;
+              }
+            }
           }
         }
 
@@ -129,4 +172,4 @@ struct CountOp : public FunctionPass
 };
 } // namespace
 char CountOp::ID = 0;
-static RegisterPass<CountOp> X("opCounter", "Counts opcodes per functions");
+static RegisterPass<CountOp> X("optAddr", "Counts opcodes per functions");
