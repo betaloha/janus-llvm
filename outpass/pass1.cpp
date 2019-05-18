@@ -115,22 +115,32 @@ struct CountOp : public FunctionPass
               pushForwardTop(inst);
               //OPT_ADDR((void*)idx, 0, addr, size);
             }else{
-              if((calledFunc->getName().find("memcpy") != std::string::npos)){
+              if(0&(calledFunc->getName().find("memcpy") != std::string::npos)){
+              // Dest
               Value *v1 = inst->getOperand(0);
               errs() << "v1 type:";
               v1->getType()->print(errs());
               errs() << '\n';
-              //get the size of the flush instruction
+              // Src
               Value *v2 = inst->getOperand(1);
               errs() << "v2 type:";
               v2->getType()->print(errs());
               errs() << '\n';
+              // Size
               Value *v3 = inst->getOperand(3);
               errs() << "v3 type:";
               v3->getType()->print(errs());
               errs() << '\n';
-              Module *M = F.getParent();
+              // Get the ancestor of the Src.
+              Instruction *src_inst = dyn_cast<Instruction>(v2);
+              Instruction *target = inst;
+              if(src_inst != NULL){
+                  target=src_inst;
+              }
 
+
+
+              Module *M = F.getParent();
               Constant *c = M->getOrInsertFunction("OPT_AUTO",
                                                    Type::getVoidTy(F.getContext()),
                                                    v1->getType(),
@@ -141,7 +151,7 @@ struct CountOp : public FunctionPass
               //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
               //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
               //insert the opt before the first instruction
-              IRBuilder<> builder(inst);
+              IRBuilder<> builder(target);
 
               //Instruction* injected_inst = builder.CreateCall(opt_func, {v1, v2, v3});
               //injected_inst->moveBefore(inst);
