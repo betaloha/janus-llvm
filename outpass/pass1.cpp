@@ -115,7 +115,7 @@ struct CountOp : public FunctionPass
               pushForwardTop(inst);
               //OPT_ADDR((void*)idx, 0, addr, size);
             }else{
-              if(0&(calledFunc->getName().find("memcpy") != std::string::npos)){
+              if((calledFunc->getName().find("memcpy") != std::string::npos)){
               // Dest
               Value *v1 = inst->getOperand(0);
               errs() << "v1 type:";
