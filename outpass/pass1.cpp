@@ -20,7 +20,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Value.h"
-#include <unordered_set>
+#include <vector>
 using namespace llvm;
 namespace
 {
@@ -33,22 +33,59 @@ struct CountOp : public FunctionPass
     for (int j = 0; j < operandCount; j++)
     {
       Value *v = inst->getOperand(j);
-      pushForward(v);
+      pushForward(v, inst);
     }
   }
-  //std::unordered_set<Instruction *> pushed_instructions;
-  void pushForward(Value *v)
+  //std::vector<Instruction *> pushed_load;
+  void pushForward(Value *v, Instruction *parent)
   {
     Instruction *inst = dyn_cast<Instruction>(v);
     if (inst == NULL)
     {
       return;
     }
+    if (parent->getParent() != inst->getParent())
+    {
+      return;
+    }
     inst->moveBefore(bottom);
     bottom = inst;
+    const char *instOpcodeName = inst->getOpcodeName();
+    int isLoad = (std::string(instOpcodeName).find("load") != std::string::npos);
+    errs() << instOpcodeName << '\n';
+    if (isLoad)
+    {
+      // If the instruction is load, we must also push associated store forward.
+      // This is a bit hacky, if there are multiple stores associated with that addr,
+      // this may not work.
+
+      // Look for associated store instruction in the basicblock
+      for (auto &I : *inst->getParent())
+      {
+        Instruction *inst2 = &I;
+        const char *instOpcodeName2 = inst2->getOpcodeName();
+        int isStore = (std::string(instOpcodeName2).find("store") != std::string::npos);
+        if(!isStore){
+          continue;
+        }
+        // If the load and store address is match, move the store before the load.
+        // Get first operand of the load instruction
+        Value *loadAddr = inst->getOperand(0);
+        // Get second operand of the store instruction
+        Value *storeAddr = inst2->getOperand(1);
+        if (loadAddr == storeAddr)
+        {
+          inst2->moveBefore(inst);
+          bottom=inst2;
+          pushForwardTop(inst2);
+        }
+      }
+    }
+
+    
     pushForwardTop(inst);
   }
-
+  std::vector<Instruction *> pending_load;
   std::map<std::string, int> opCounter;
   static char ID;
   CountOp() : FunctionPass(ID) {}
@@ -59,6 +96,7 @@ struct CountOp : public FunctionPass
     //to do, change to basic block iterator
     for (auto &B : F)
     {
+      pending_load.clear();
       if (F.size() > 1)
       {
         break;
@@ -84,7 +122,7 @@ struct CountOp : public FunctionPass
 
               errs() << "CALL: " << calledFunc->getName() << '\n';
               bottom = &*inst_begin(F);
-              Instruction *injection_point = bottom->getNextNode();
+              Instruction *injection_point = bottom; //->getNextNode();
               //pushForwardTop(inst);
               //Just need to insert OPT ADDR now.
               //get the address of the flush instruction
@@ -108,62 +146,68 @@ struct CountOp : public FunctionPass
               //ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(64, opt_id));
               //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
               //insert the opt before the first instruction
-              IRBuilder<> builder(injection_point);
+              IRBuilder<> builder(inst);
 
-              builder.CreateCall(opt_addr_func, {v1, v2, opt_id_const});
+              Instruction *injectedInst = builder.CreateCall(opt_addr_func, {v1, v2, opt_id_const});
+              injectedInst->moveAfter(B.getFirstNonPHI());
               opt_id++;
               pushForwardTop(inst);
               //OPT_ADDR((void*)idx, 0, addr, size);
-            }else{
-              if((calledFunc->getName().find("memcpy") != std::string::npos)){
-              // Dest
-              Value *v1 = inst->getOperand(0);
-              errs() << "v1 type:";
-              v1->getType()->print(errs());
-              errs() << '\n';
-              // Src
-              Value *v2 = inst->getOperand(1);
-              errs() << "v2 type:";
-              v2->getType()->print(errs());
-              errs() << '\n';
-              // Size
-              Value *v3 = inst->getOperand(3);
-              errs() << "v3 type:";
-              v3->getType()->print(errs());
-              errs() << '\n';
-              // Get the ancestor of the Src.
-              Instruction *src_inst = dyn_cast<Instruction>(v2);
-              Instruction *target = inst;
-              int isSelf=0;
-              if(src_inst != NULL){
-                  target=src_inst;
-                  isSelf=1;
-              }
+            }
+            else
+            {
+              if ((calledFunc->getName().find("memcpy") != std::string::npos))
+              {
+                // Dest
+                Value *v1 = inst->getOperand(0);
+                errs() << "v1 type:";
+                v1->getType()->print(errs());
+                errs() << '\n';
+                // Src
+                Value *v2 = inst->getOperand(1);
+                errs() << "v2 type:";
+                v2->getType()->print(errs());
+                errs() << '\n';
+                // Size
+                Value *v3 = inst->getOperand(3);
+                errs() << "v3 type:";
+                v3->getType()->print(errs());
+                errs() << '\n';
+                // Get the ancestor of the Src.
+                Instruction *src_inst = dyn_cast<Instruction>(v2);
+                Instruction *target = inst;
+                int isSelf = 0;
+                if (src_inst != NULL)
+                {
+                  target = src_inst;
+                  isSelf = 1;
+                }
 
+                Module *M = F.getParent();
+                ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(32, opt_id));
+                Constant *c = M->getOrInsertFunction("OPT_AUTO",
+                                                     Type::getVoidTy(F.getContext()),
+                                                     v1->getType(),
+                                                     v2->getType(),
+                                                     v3->getType(),
+                                                     opt_id_const->getType());
+                Function *opt_func = cast<Function>(c);
+                //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
+                //insert the opt before the first instruction
+                IRBuilder<> builder(inst);
 
+                Instruction *injected_inst = builder.CreateCall(opt_func, {v1, v2, v3, opt_id_const});
 
-              Module *M = F.getParent();
-              ConstantInt *opt_id_const = ConstantInt::get(M->getContext(), APInt(32, opt_id));
-              Constant *c = M->getOrInsertFunction("OPT_AUTO",
-                                                   Type::getVoidTy(F.getContext()),
-                                                   v1->getType(),
-                                                   v2->getType(),
-                                                   v3->getType(),
-                                                   opt_id_const->getType());
-              Function *opt_func = cast<Function>(c);
-              //ConstantInt *thread_id_const = ConstantInt::get(M->getContext(), APInt(8, 0));
-              //insert the opt before the first instruction
-              IRBuilder<> builder(inst);
+                if (isSelf)
+                {
+                  injected_inst->moveAfter(inst);
+                }
+                else
+                {
+                  injected_inst->moveAfter(inst);
+                }
 
-              Instruction* injected_inst = builder.CreateCall(opt_func, {v1, v2, v3, opt_id_const});
-              
-              if(isSelf){
-                injected_inst->moveAfter(inst);
-              }else{
-                injected_inst->moveAfter(inst);
-              }
-              
-              opt_id++;
+                opt_id++;
               }
             }
           }
@@ -183,6 +227,12 @@ struct CountOp : public FunctionPass
     }
     */
       }
+      /*
+      for (auto &P : pending_load)
+      {
+        Instruction *inst = &I;
+      }
+      */
     }
     errs() << "done\n";
     return false;
