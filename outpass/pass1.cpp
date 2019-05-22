@@ -78,6 +78,7 @@ struct CountOp : public FunctionPass
           inst2->moveBefore(inst);
           bottom=inst2;
           pushForwardTop(inst2);
+          break;
         }
       }
     }
